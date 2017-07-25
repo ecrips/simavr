@@ -29,13 +29,20 @@
 #include "avr_spi.h"
 #include "avr_ioport.h"
 
+//#define DEBUG
+#ifdef DEBUG
+#define DEBUG_PRINT(...) printf(__VA_ARGS__)
+#else
+#define DEBUG_PRINT(...)
+#endif
+
 /*
  * Write a byte at the current cursor location and then scroll the cursor.
  */
 static void
-ssd1306_write_data (ssd1306_t *part)
+ssd1306_write_data (ssd1306_t *part, uint8_t data)
 {
-	part->vram[part->cursor.page][part->cursor.column] = part->spi_data;
+	part->vram[part->cursor.page][part->cursor.column] = data;
 
 	// Scroll the cursor
 	if (++(part->cursor.column) >= SSD1306_VIRT_COLUMNS)
@@ -55,86 +62,90 @@ ssd1306_write_data (ssd1306_t *part)
  * byte commands and initiating multi-byte commands.
  */
 void
-ssd1306_update_command_register (ssd1306_t *part)
+ssd1306_update_command_register (ssd1306_t *part, uint8_t data)
 {
-	switch (part->spi_data)
+	switch (data)
 	{
 		case SSD1306_VIRT_SET_CONTRAST:
-			part->command_register = part->spi_data;
-			//printf ("SSD1306: CONTRAST SET COMMAND: 0x%02x\n", part->spi_data);
+			part->command_register = data;
+			DEBUG_PRINT("SSD1306: CONTRAST SET COMMAND: 0x%02x\n",
+			            data);
 			return;
 		case SSD1306_VIRT_DISP_NORMAL:
 			ssd1306_set_flag (part, SSD1306_FLAG_DISPLAY_INVERTED,
 			                  0);
 			ssd1306_set_flag (part, SSD1306_FLAG_DIRTY, 1);
-			//printf ("SSD1306: DISPLAY NORMAL\n");
+			DEBUG_PRINT("SSD1306: DISPLAY NORMAL\n");
 			SSD1306_CLEAR_COMMAND_REG(part);
 			return;
 		case SSD1306_VIRT_DISP_INVERTED:
 			ssd1306_set_flag (part, SSD1306_FLAG_DISPLAY_INVERTED,
 			                  1);
 			ssd1306_set_flag (part, SSD1306_FLAG_DIRTY, 1);
-			//printf ("SSD1306: DISPLAY INVERTED\n");
+			DEBUG_PRINT("SSD1306: DISPLAY INVERTED\n");
 			SSD1306_CLEAR_COMMAND_REG(part);
 			return;
 		case SSD1306_VIRT_DISP_SUSPEND:
 			ssd1306_set_flag (part, SSD1306_FLAG_DISPLAY_ON, 0);
 			ssd1306_set_flag (part, SSD1306_FLAG_DIRTY, 1);
-			//printf ("SSD1306: DISPLAY SUSPENDED\n");
+			DEBUG_PRINT("SSD1306: DISPLAY SUSPENDED\n");
 			SSD1306_CLEAR_COMMAND_REG(part);
 			return;
 		case SSD1306_VIRT_DISP_ON:
 			ssd1306_set_flag (part, SSD1306_FLAG_DISPLAY_ON, 1);
 			ssd1306_set_flag (part, SSD1306_FLAG_DIRTY, 1);
-			//printf ("SSD1306: DISPLAY ON\n");
+			DEBUG_PRINT("SSD1306: DISPLAY ON\n");
 			SSD1306_CLEAR_COMMAND_REG(part);
 			return;
 		case SSD1306_VIRT_SET_PAGE_START_ADDR
 		                ... SSD1306_VIRT_SET_PAGE_START_ADDR
 		                                + SSD1306_VIRT_PAGES - 1:
-			part->cursor.page = part->spi_data
+			part->cursor.page = data
 			                - SSD1306_VIRT_SET_PAGE_START_ADDR;
-			//printf ("SSD1306: SET PAGE ADDRESS: 0x%02x\n", part->spi_data);
+			DEBUG_PRINT("SSD1306: SET PAGE ADDRESS: 0x%02x\n",
+			            data);
 			SSD1306_CLEAR_COMMAND_REG(part);
 			return;
 		case SSD1306_VIRT_SET_COLUMN_LOW_NIBBLE
 		                ... SSD1306_VIRT_SET_COLUMN_LOW_NIBBLE + 0xF:
-			part->spi_data -= SSD1306_VIRT_SET_COLUMN_LOW_NIBBLE;
+			data -= SSD1306_VIRT_SET_COLUMN_LOW_NIBBLE;
 			part->cursor.column = (part->cursor.column & 0xF0)
-			                | (part->spi_data & 0xF);
-			//printf ("SSD1306: SET COLUMN LOW NIBBLE: 0x%02x\n",part->spi_data);
+			                | (data & 0xF);
+			DEBUG_PRINT("SSD1306: SET COLUMN LOW NIBBLE: 0x%02x\n",
+			            data);
 			SSD1306_CLEAR_COMMAND_REG(part);
 			return;
 		case SSD1306_VIRT_SET_COLUMN_HIGH_NIBBLE
 		                ... SSD1306_VIRT_SET_COLUMN_HIGH_NIBBLE + 0xF:
-			part->spi_data -= SSD1306_VIRT_SET_COLUMN_HIGH_NIBBLE;
+			data -= SSD1306_VIRT_SET_COLUMN_HIGH_NIBBLE;
 			part->cursor.column = (part->cursor.column & 0xF)
-			                | ((part->spi_data & 0xF) << 4);
-			//printf ("SSD1306: SET COLUMN HIGH NIBBLE: 0x%02x\n", part->spi_data);
+			                | ((data & 0xF) << 4);
+			DEBUG_PRINT("SSD1306: SET COLUMN HIGH NIBBLE: 0x%02x\n",
+			            data);
 			SSD1306_CLEAR_COMMAND_REG(part);
 			return;
 		case SSD1306_VIRT_SET_SEG_REMAP_0:
 			ssd1306_set_flag (part, SSD1306_FLAG_SEGMENT_REMAP_0,
 			                  1);
-			//printf ("SSD1306: SET COLUMN ADDRESS 0 TO OLED SEG0 to \n");
+			DEBUG_PRINT("SSD1306: SET COLUMN ADDRESS 0 TO OLED SEG0 to \n");
 			SSD1306_CLEAR_COMMAND_REG(part);
 			return;
 		case SSD1306_VIRT_SET_SEG_REMAP_127:
 			ssd1306_set_flag (part, SSD1306_FLAG_SEGMENT_REMAP_0,
 			                  0);
-			//printf ("SSD1306: SET COLUMN ADDRESS 127 TO OLED SEG0 to \n");
+			DEBUG_PRINT("SSD1306: SET COLUMN ADDRESS 127 TO OLED SEG0 to \n");
 			SSD1306_CLEAR_COMMAND_REG(part);
 			return;
 		case SSD1306_VIRT_SET_COM_SCAN_NORMAL:
 			ssd1306_set_flag (part, SSD1306_FLAG_COM_SCAN_NORMAL,
 			                  1);
-			//printf ("SSD1306: SET COM OUTPUT SCAN DIRECTION NORMAL \n");
+			DEBUG_PRINT("SSD1306: SET COM OUTPUT SCAN DIRECTION NORMAL \n");
 			SSD1306_CLEAR_COMMAND_REG(part);
 			return;
 		case SSD1306_VIRT_SET_COM_SCAN_INVERTED:
 			ssd1306_set_flag (part, SSD1306_FLAG_COM_SCAN_NORMAL,
 			                  0);
-			//printf ("SSD1306: SET COM OUTPUT SCAN DIRECTION REMAPPED \n");
+			DEBUG_PRINT("SSD1306: SET COM OUTPUT SCAN DIRECTION REMAPPED \n");
 			SSD1306_CLEAR_COMMAND_REG(part);
 			return;
 		default:
@@ -147,15 +158,16 @@ ssd1306_update_command_register (ssd1306_t *part)
  * Multi-byte command setting
  */
 void
-ssd1306_update_setting (ssd1306_t *part)
+ssd1306_update_setting (ssd1306_t *part, uint8_t data)
 {
 	switch (part->command_register)
 	{
 		case SSD1306_VIRT_SET_CONTRAST:
-			part->contrast_register = part->spi_data;
+			part->contrast_register = data;
 			ssd1306_set_flag (part, SSD1306_FLAG_DIRTY, 1);
 			SSD1306_CLEAR_COMMAND_REG(part);
-			//printf ("SSD1306: CONTRAST SET: 0x%02x\n", part->contrast_register);
+			DEBUG_PRINT("SSD1306: CONTRAST SET: 0x%02x\n",
+			            part->contrast_register);
 			return;
 		default:
 			// Unknown command
@@ -169,16 +181,16 @@ ssd1306_update_setting (ssd1306_t *part)
  * byte command.
  */
 static void
-ssd1306_write_command (ssd1306_t *part)
+ssd1306_write_command (ssd1306_t *part, uint8_t data)
 {
 	if (!part->command_register)
 	{
 		// Single byte or start of multi-byte command
-		ssd1306_update_command_register (part);
+		ssd1306_update_command_register (part, data);
 	} else
 	{
 		// Multi-byte command setting
-		ssd1306_update_setting (part);
+		ssd1306_update_setting (part, data);
 	}
 }
 
@@ -194,15 +206,15 @@ ssd1306_spi_in_hook (struct avr_irq_t * irq, uint32_t value, void * param)
 	if (part->cs_pin)
 		return;
 
-	part->spi_data = value & 0xFF;
+	uint8_t data = value & 0xFF;
 
 	switch (part->di_pin)
 	{
 		case SSD1306_VIRT_DATA:
-			ssd1306_write_data (part);
+			ssd1306_write_data (part, data);
 			break;
 		case SSD1306_VIRT_INSTRUCTION:
-			ssd1306_write_command (part);
+			ssd1306_write_command (part, data);
 			break;
 		default:
 			// Invalid value
@@ -218,7 +230,7 @@ ssd1306_cs_hook (struct avr_irq_t * irq, uint32_t value, void * param)
 {
 	ssd1306_t * p = (ssd1306_t*) param;
 	p->cs_pin = value & 0xFF;
-	//printf ("SSD1306: CHIP SELECT:  0x%02x\n", value);
+	DEBUG_PRINT("SSD1306: CHIP SELECT:  0x%02x\n", value);
 
 }
 
@@ -230,7 +242,7 @@ ssd1306_di_hook (struct avr_irq_t * irq, uint32_t value, void * param)
 {
 	ssd1306_t * part = (ssd1306_t*) param;
 	part->di_pin = value & 0xFF;
-	//printf ("SSD1306: DATA / INSTRUCTION:  0x%08x\n", value);
+	DEBUG_PRINT("SSD1306: DATA / INSTRUCTION:  0x%08x\n", value);
 }
 
 /*
@@ -239,7 +251,7 @@ ssd1306_di_hook (struct avr_irq_t * irq, uint32_t value, void * param)
 static void
 ssd1306_reset_hook (struct avr_irq_t * irq, uint32_t value, void * param)
 {
-	//printf ("SSD1306: RESET\n");
+	DEBUG_PRINT("SSD1306: RESET\n");
 	ssd1306_t * part = (ssd1306_t*) param;
 	if (irq->value && !value)
 	{

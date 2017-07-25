@@ -145,7 +145,6 @@ typedef struct ssd1306_t
 	uint8_t contrast_register;
 	uint8_t cs_pin;
 	uint8_t di_pin;
-	uint8_t spi_data;
 } ssd1306_t;
 
 typedef struct ssd1306_pin_t
