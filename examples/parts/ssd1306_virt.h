@@ -111,6 +111,13 @@ enum
 
 enum
 {
+	IRQ_SSD1306_I2C_SCL,
+	IRQ_SSD1306_I2C_SDA,
+	IRQ_SSD1306_I2C_COUNT
+};
+
+enum
+{
 	SSD1306_FLAG_DISPLAY_INVERTED = 0,
 	SSD1306_FLAG_DISPLAY_ON,
 	SSD1306_FLAG_SEGMENT_REMAP_0,
@@ -145,6 +152,11 @@ typedef struct ssd1306_t
 	uint8_t contrast_register;
 	uint8_t cs_pin;
 	uint8_t di_pin;
+
+	int i2c_state;
+	uint8_t i2c_scl, i2c_sda;
+	uint8_t i2c_byte;
+	uint8_t i2c_bits;
 } ssd1306_t;
 
 typedef struct ssd1306_pin_t
@@ -163,6 +175,9 @@ typedef struct ssd1306_wiring_t
 void
 ssd1306_init (struct avr_t *avr, struct ssd1306_t * b, int width, int height);
 
+void
+ssd1306_init_i2c (struct avr_t *avr, struct ssd1306_t * part, int width, int height);
+
 static inline int
 ssd1306_set_flag (ssd1306_t *b, uint16_t bit, int val)
 {
@@ -179,5 +194,8 @@ ssd1306_get_flag (ssd1306_t *b, uint16_t bit)
 
 void
 ssd1306_connect (ssd1306_t * part, ssd1306_wiring_t * wiring);
+
+void
+ssd1306_connect_i2c (ssd1306_t *part, avr_irq_t *scl, avr_irq_t *sda);
 
 #endif 

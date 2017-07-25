@@ -23,6 +23,7 @@
 
 #include <stdlib.h>
 #include <stdio.h>
+#include <string.h>
 #include <libgen.h>
 
 #include "sim_avr.h"
@@ -126,11 +127,18 @@ int
 main (int argc, char *argv[])
 {
 	elf_firmware_t f;
+#ifndef I2C_MODE
 	const char * fname = "atmega32_ssd1306.axf";
-	char path[256];
-	sprintf (path, "%s/%s", dirname (argv[0]), fname);
-	printf ("Firmware pathname is %s\n", path);
+#else
+	const char * fname = "main.elf";
+#endif
+	printf ("Firmware pathname is %s\n", fname);
 	elf_read_firmware (fname, &f);
+
+#ifdef I2C_MODE
+	strcpy(f.mmcu, "attiny85");
+	f.frequency = 1000000;
+#endif
 
 	printf ("firmware %s f=%d mmcu=%s\n", fname, (int) f.frequency, f.mmcu);
 
@@ -144,6 +152,7 @@ main (int argc, char *argv[])
 	avr_init (avr);
 	avr_load_firmware (avr, &f);
 
+#ifndef I2C_MODE
 	ssd1306_init (avr, &ssd1306, 128, 64);
 
 	// SSD1306 wired to the SPI bus, with the following additional pins:
@@ -158,6 +167,15 @@ main (int argc, char *argv[])
 	};
 
 	ssd1306_connect (&ssd1306, &wiring);
+#else
+	ssd1306_init_i2c(avr, &ssd1306, 128, 64);
+
+	ssd1306_connect_i2c(&ssd1306,
+			avr_io_getirq(avr, /* SCL */
+				AVR_IOCTL_IOPORT_GETIRQ('B'), 2),
+			avr_io_getirq(avr, /* SDA */
+				AVR_IOCTL_IOPORT_GETIRQ('B'), 0));
+#endif
 
 	printf ("SSD1306 display demo\n   Press 'q' to quit\n");
 

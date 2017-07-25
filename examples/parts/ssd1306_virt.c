@@ -36,6 +36,8 @@
 #define DEBUG_PRINT(...)
 #endif
 
+#define OUR_I2C_ADDRESS 0x3C
+
 /*
  * Write a byte at the current cursor location and then scroll the cursor.
  */
@@ -268,11 +270,132 @@ ssd1306_reset_hook (struct avr_irq_t * irq, uint32_t value, void * param)
 
 }
 
+/* I2C IRQ functions */
+
+enum {
+	I2C_IDLE,
+	I2C_START,
+	I2C_ADDRESS,
+	I2C_COMMAND,
+	I2C_PENDING_ACK,
+	I2C_ACK,
+	I2C_NOTFORUS
+};
+
+static void
+ssd1306_i2c_handle_byte(ssd1306_t *part)
+{
+	avr_raise_irq(part->irq+2, part->i2c_byte);
+	if (part->i2c_state == I2C_ADDRESS) {
+		if (part->i2c_byte>>1 != OUR_I2C_ADDRESS) {
+			part->i2c_state = I2C_NOTFORUS;
+			return;
+		}
+		uint8_t rw = part->i2c_byte & 1;
+		if (rw) {
+			/* Read mode - not supported */
+			part->i2c_state = I2C_NOTFORUS;
+		}
+		return;
+	}
+	switch(part->di_pin) {
+		case 0:
+			part->di_pin = part->i2c_byte | 1;
+			break;
+		case 0x81:
+			part->di_pin = 0;
+			/* Fall through */
+		case 0x1:
+			ssd1306_write_command(part, part->i2c_byte);
+			break;
+		case 0xc1:
+			part->di_pin = 0;
+			/* Fall through */
+		case 0x41:
+			ssd1306_write_data(part, part->i2c_byte);
+			break;
+	}
+}
+
+static void
+ssd1306_i2c_scl(struct avr_irq_t *irq, uint32_t value, void *param)
+{
+	ssd1306_t * part = (ssd1306_t*) param;
+
+	switch (part->i2c_state) {
+		case I2C_START:
+			if (value == 0) {
+				part->i2c_state = I2C_ADDRESS;
+				part->i2c_bits = 0;
+				part->i2c_byte = 0;
+				part->di_pin = 0;
+			}
+			break;
+		case I2C_COMMAND:
+		case I2C_ADDRESS:
+			if (value == 1) {
+				part->i2c_byte <<= 1;
+				part->i2c_byte |= part->i2c_sda?1:0;
+				part->i2c_bits++;
+				if (part->i2c_bits == 8) {
+					ssd1306_i2c_handle_byte(part);
+					part->i2c_state = I2C_PENDING_ACK;
+				}
+			}
+			break;
+		case I2C_PENDING_ACK:
+			if (value) {
+				/* Send ack bit */
+				avr_raise_irq(part->irq + IRQ_SSD1306_I2C_SDA, 0);
+				part->i2c_state = I2C_ACK;
+			}
+			break;
+		case I2C_ACK:
+			if (!value) {
+				/* Stop sending ack bit */
+				avr_raise_irq_float(part->irq + IRQ_SSD1306_I2C_SDA, 1, 1);
+				part->i2c_state = I2C_COMMAND;
+				part->i2c_bits = 0;
+				part->i2c_byte = 0;
+			}
+			break;
+	}
+
+	part->i2c_scl = value;
+}
+
+static void
+ssd1306_i2c_sda(struct avr_irq_t *irq, uint32_t value, void *param)
+{
+	ssd1306_t * part = (ssd1306_t*) param;
+
+	switch (part->i2c_state) {
+		case I2C_IDLE: /* Start */
+		case I2C_COMMAND: /* Repeated start */
+			if (value == 0 && part->i2c_scl) {
+				part->i2c_state = I2C_START;
+			}
+			break;
+	}
+
+	if (part->i2c_scl && value) {
+		/* STOP */
+		part->i2c_state = I2C_IDLE;
+	}
+
+	part->i2c_sda = value;
+}
+
 static const char * irq_names[IRQ_SSD1306_COUNT] =
 { [IRQ_SSD1306_SPI_BYTE_IN] = "=ssd1306.SDIN", [IRQ_SSD1306_RESET
                 ] = "<ssd1306.RS", [IRQ_SSD1306_DATA_INSTRUCTION
                 ] = "<ssd1306.RW", [IRQ_SSD1306_ENABLE] = "<ssd1306.E",
                 [IRQ_SSD1306_ADDR] = "7>hd44780.ADDR" };
+
+static const char * irq_names_i2c[IRQ_SSD1306_I2C_COUNT] = {
+	[IRQ_SSD1306_I2C_SCL] = "ssd1306.SCL",
+	[IRQ_SSD1306_I2C_SDA] = "ssd1306.SDA"
+};
 
 void
 ssd1306_connect (ssd1306_t * part, ssd1306_wiring_t * wiring)
@@ -305,7 +428,14 @@ ssd1306_connect (ssd1306_t * part, ssd1306_wiring_t * wiring)
 }
 
 void
-ssd1306_init (struct avr_t *avr, struct ssd1306_t * part, int width, int height)
+ssd1306_connect_i2c (ssd1306_t *part, avr_irq_t *scl, avr_irq_t *sda)
+{
+	avr_connect_irq ( scl, part->irq + IRQ_SSD1306_I2C_SCL );
+	avr_connect_irq ( sda, part->irq + IRQ_SSD1306_I2C_SDA );
+}
+
+static void
+ssd1306_init_internal (struct avr_t *avr, struct ssd1306_t * part, int width, int height, int i2c)
 {
 	if (!avr || !part)
 		return;
@@ -316,23 +446,48 @@ ssd1306_init (struct avr_t *avr, struct ssd1306_t * part, int width, int height)
 	part->rows = height;
 	part->pages = height / 8; 	// 8 pixels per page
 
-	/*
-	 * Register callbacks on all our IRQs
-	 */
-	part->irq = avr_alloc_irq (&avr->irq_pool, 0, IRQ_SSD1306_COUNT,
-	                           irq_names);
+	if (!i2c) {
+		/*
+		 * Register callbacks on all our IRQs
+		 */
+		part->irq = avr_alloc_irq (&avr->irq_pool, 0, IRQ_SSD1306_COUNT,
+		                           irq_names);
 
-	avr_irq_register_notify (part->irq + IRQ_SSD1306_SPI_BYTE_IN,
-	                         ssd1306_spi_in_hook, part);
-	avr_irq_register_notify (part->irq + IRQ_SSD1306_RESET,
-	                         ssd1306_reset_hook, part);
-	avr_irq_register_notify (part->irq + IRQ_SSD1306_ENABLE,
-	                         ssd1306_cs_hook, part);
-	avr_irq_register_notify (part->irq + IRQ_SSD1306_DATA_INSTRUCTION,
-	                         ssd1306_di_hook, part);
+		avr_irq_register_notify (part->irq + IRQ_SSD1306_SPI_BYTE_IN,
+		                         ssd1306_spi_in_hook, part);
+		avr_irq_register_notify (part->irq + IRQ_SSD1306_RESET,
+		                         ssd1306_reset_hook, part);
+		avr_irq_register_notify (part->irq + IRQ_SSD1306_ENABLE,
+		                         ssd1306_cs_hook, part);
+		avr_irq_register_notify (part->irq + IRQ_SSD1306_DATA_INSTRUCTION,
+		                         ssd1306_di_hook, part);
+	} else {
+		part->irq = avr_alloc_irq (&avr->irq_pool, 0, IRQ_SSD1306_I2C_COUNT,
+				irq_names_i2c);
+
+		avr_irq_register_notify(part->irq + IRQ_SSD1306_I2C_SCL,
+				ssd1306_i2c_scl, part);
+		avr_irq_register_notify(part->irq + IRQ_SSD1306_I2C_SDA,
+				ssd1306_i2c_sda, part);
+	}
 
 	printf ("SSD1306: %duS is %d cycles for your AVR\n", 37,
 	        (int) avr_usec_to_cycles (avr, 37));
 	printf ("SSD1306: %duS is %d cycles for your AVR\n", 1,
 	        (int) avr_usec_to_cycles (avr, 1));
+}
+
+void
+ssd1306_init (struct avr_t *avr, struct ssd1306_t * part, int width, int height)
+{
+	ssd1306_init_internal(avr, part, width, height, 0);
+}
+
+void
+ssd1306_init_i2c (struct avr_t *avr, struct ssd1306_t * part, int width, int height)
+{
+	ssd1306_init_internal(avr, part, width, height, 1);
+	/* Both inputs should start high */
+	part->i2c_sda = 1;
+	part->i2c_scl = 1;
 }
