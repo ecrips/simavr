@@ -285,7 +285,7 @@ enum {
 static void
 ssd1306_i2c_handle_byte(ssd1306_t *part)
 {
-	avr_raise_irq(part->irq+2, part->i2c_byte);
+	DEBUG_PRINT("i2c_byte: 0x%x\n", part->i2c_byte);
 	if (part->i2c_state == I2C_ADDRESS) {
 		if (part->i2c_byte>>1 != OUR_I2C_ADDRESS) {
 			part->i2c_state = I2C_NOTFORUS;
