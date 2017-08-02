@@ -47,9 +47,9 @@ ssd1306_write_data (ssd1306_t *part, uint8_t data)
 	part->vram[part->cursor.page][part->cursor.column] = data;
 
 	// Scroll the cursor
-	if (++(part->cursor.column) >= SSD1306_VIRT_COLUMNS)
+	if (++(part->cursor.column) > part->column_end)
 	{
-		part->cursor.column = 0;
+		part->cursor.column = part->column_start;
 		if (++(part->cursor.page) >= SSD1306_VIRT_PAGES)
 		{
 			part->cursor.page = 0;
@@ -150,6 +150,12 @@ ssd1306_update_command_register (ssd1306_t *part, uint8_t data)
 			DEBUG_PRINT("SSD1306: SET COM OUTPUT SCAN DIRECTION REMAPPED \n");
 			SSD1306_CLEAR_COMMAND_REG(part);
 			return;
+		case SSD1306_VIRT_SET_COL_ADDR:
+			part->command_register = data;
+			part->column_start = 0xFF;
+			DEBUG_PRINT("SSD1306: SET COLUMN ADDRESS: 0x%02x\n",
+			            data);
+			return;
 		default:
 			// Unknown command
 			return;
@@ -170,6 +176,17 @@ ssd1306_update_setting (ssd1306_t *part, uint8_t data)
 			SSD1306_CLEAR_COMMAND_REG(part);
 			DEBUG_PRINT("SSD1306: CONTRAST SET: 0x%02x\n",
 			            part->contrast_register);
+			return;
+		case SSD1306_VIRT_SET_COL_ADDR:
+			if (part->column_start == 0xFF) {
+				part->column_start = data;
+				return;
+			}
+			part->column_end = data;
+			part->cursor.column = part->column_start;
+			DEBUG_PRINT("SSD1306: SET COLUMN ADDRESS: %d-%d\n",
+					part->column_start, part->column_end);
+			SSD1306_CLEAR_COMMAND_REG(part);
 			return;
 		default:
 			// Unknown command
@@ -445,6 +462,8 @@ ssd1306_init_internal (struct avr_t *avr, struct ssd1306_t * part, int width, in
 	part->columns = width;
 	part->rows = height;
 	part->pages = height / 8; 	// 8 pixels per page
+	part->column_start = 0;
+	part->column_end = width-1;
 
 	if (!i2c) {
 		/*

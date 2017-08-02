@@ -152,6 +152,7 @@ typedef struct ssd1306_t
 	uint8_t contrast_register;
 	uint8_t cs_pin;
 	uint8_t di_pin;
+	uint8_t column_start, column_end;
 
 	int i2c_state;
 	uint8_t i2c_scl, i2c_sda;
