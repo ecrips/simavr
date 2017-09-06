@@ -302,7 +302,8 @@ enum {
 static void
 ssd1306_i2c_handle_byte(ssd1306_t *part)
 {
-	DEBUG_PRINT("i2c_byte: 0x%x\n", part->i2c_byte);
+	DEBUG_PRINT("i2c_byte: 0x%x state:%d\n", part->i2c_byte,
+			part->i2c_state);
 	if (part->i2c_state == I2C_ADDRESS) {
 		if (part->i2c_byte>>1 != OUR_I2C_ADDRESS) {
 			part->i2c_state = I2C_NOTFORUS;
@@ -356,7 +357,9 @@ ssd1306_i2c_scl(struct avr_irq_t *irq, uint32_t value, void *param)
 				part->i2c_bits++;
 				if (part->i2c_bits == 8) {
 					ssd1306_i2c_handle_byte(part);
-					part->i2c_state = I2C_PENDING_ACK;
+					if (part->i2c_state != I2C_NOTFORUS)
+						part->i2c_state =
+							I2C_PENDING_ACK;
 				}
 			}
 			break;
