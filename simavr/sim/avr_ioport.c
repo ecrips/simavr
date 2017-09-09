@@ -44,7 +44,7 @@ avr_ioport_read(
 
 static void
 avr_ioport_update_irqs(
-		avr_ioport_t * p)
+		avr_ioport_t * p, int do_pull_up)
 {
 	avr_t * avr = p->io.avr;
 	uint8_t ddr = avr->data[p->r_ddr];
@@ -55,9 +55,9 @@ avr_ioport_update_irqs(
 	for (int i = 0; i < 8; i++) {
 		if (ddr & (1 << i))
 			avr_raise_irq(p->io.irq + i, (avr->data[p->r_port] >> i) & 1);
-		else if (p->external.pull_mask & (1 << i))
+		else if ((p->external.pull_mask & (1 << i)) && (do_pull_up & (1 << i)))
 			avr_raise_irq(p->io.irq + i, (p->external.pull_value >> i) & 1);
-		else if ((avr->data[p->r_port] >> i) & 1)
+		else if (((avr->data[p->r_port] >> i) & 1) && (do_pull_up & (1 << i)))
 			avr_raise_irq(p->io.irq + i, 1);
 	}
 	uint8_t pin = (avr->data[p->r_pin] & ~ddr) | (avr->data[p->r_port] & ddr);
@@ -83,10 +83,12 @@ avr_ioport_write(
 {
 	avr_ioport_t * p = (avr_ioport_t *)param;
 
+	uint8_t old_v = avr->data[addr];
+
 	D(if (avr->data[addr] != v) printf("** PORT%c(%02x) = %02x\r\n", p->name, addr, v);)
 	avr_core_watch_write(avr, addr, v);
 	avr_raise_irq(p->io.irq + IOPORT_IRQ_REG_PORT, v);
-	avr_ioport_update_irqs(p);
+	avr_ioport_update_irqs(p, old_v ^ v);
 }
 
 /*
@@ -119,11 +121,13 @@ avr_ioport_ddr_write(
 {
 	avr_ioport_t * p = (avr_ioport_t *)param;
 
+	uint8_t old_v = avr->data[addr];
+
 	D(if (avr->data[addr] != v) printf("** DDR%c(%02x) = %02x\r\n", p->name, addr, v);)
 	avr_raise_irq(p->io.irq + IOPORT_IRQ_DIRECTION_ALL, v);
 	avr_core_watch_write(avr, addr, v);
 
-	avr_ioport_update_irqs(p);
+	avr_ioport_update_irqs(p, v ^ old_v);
 }
 
 /*
